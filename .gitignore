@@ -3,6 +3,7 @@
 # ========================================
 # Local data directory (for medical images, DICOM files, etc.)
 data/
+models/
 
 # Output directory (for model outputs, predictions, etc.)
 outputs/
