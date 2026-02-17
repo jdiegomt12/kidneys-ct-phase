@@ -1,0 +1,32 @@
+# Kidney CT Phase Segmentation Pipeline - pip Requirements
+# 
+# Minimal, focused dependencies for the kidney CT segmentation pipeline.
+# For exact reproducibility, use environment.yml with Conda instead.
+#
+# Installation:
+#   pip install -r requirements.txt
+#
+# Python version: 3.10+
+
+# Core scientific computing (REQUIRED)
+numpy>=2.2.0
+scipy>=1.15.0
+pandas>=2.3.0
+
+# Medical imaging (REQUIRED)
+SimpleITK>=2.5.0
+nibabel>=5.3.0
+pydicom>=3.0.0
+python-gdcm>=3.2.0
+
+# Visualization
+matplotlib>=3.10.0
+Pillow>=12.0.0
+
+# Segmentation (runs TotalSegmentator CLI)
+totalsegmentator>=2.12.0
+
+# Utilities
+tqdm>=4.67.0
+pyyaml>=6.0.0
+requests>=2.32.0

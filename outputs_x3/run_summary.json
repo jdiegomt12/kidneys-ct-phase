@@ -1,0 +1,14 @@
+{
+  "root_dir": "E:\\Kidney Case (anonymous",
+  "outputs_root": "outputs",
+  "features_csv": "outputs\\kidney_features.csv",
+  "failed_cases_csv": "outputs\\index\\failed_indexing.csv",
+  "num_index_entries": 3,
+  "num_failed_cases": 0,
+  "num_failed_processing": 0,
+  "processed_new_series": 3,
+  "tensors_root": "outputs\\tensors_15ch",
+  "device": "gpu",
+  "fast_totalseg": true,
+  "overwrite": false
+}

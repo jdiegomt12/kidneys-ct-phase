@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict, List, Tuple, Union
+import time
 
 import numpy as np
 
@@ -12,7 +13,7 @@ PathLike = Union[str, Path]
 
 DEFAULT_PERCENTILES = [0.15, 0.30, 0.50, 0.70, 0.85] # Moein et al. 2026
 
-def _compute_mask_stats(
+def mask_stats(
     hu_zyx: np.ndarray,
     mask_zyx: np.ndarray,
     spacing_xyz: Tuple[float, float, float],
@@ -95,36 +96,106 @@ def percentile_slices(z_min: int, z_max: int, percentiles: List[float]) -> List[
     return [min(max(i, z_min_i), z_max_i) for i in idxs]
 
 
+def xyz2zyx(mask_xyz: np.ndarray) -> np.ndarray:
+    """Convert (x,y,z) indexed array to (z,y,x) indexed array."""
+    return np.transpose(mask_xyz, (2, 1, 0)).astype(np.uint8)
+
+
+def load_cached_segmentations(
+    segmentations_root: Path,
+    case_id: str,
+    phase: str,
+) -> Tuple[np.ndarray, np.ndarray, float] | None:
+    """
+    Try to load cached kidney segmentations from NIfTI files.
+    Returns (kl_zyx, kr_zyx, resample_factor) if both files exist, else None.
+    Cached segmentations are already in original size, so factor is 1.0.
+    """
+    import nibabel as nib
+    
+    seg_case_dir = Path(segmentations_root) / case_id
+    kl_path = seg_case_dir / f"{case_id}_{phase}_kidney_left.nii.gz"
+    kr_path = seg_case_dir / f"{case_id}_{phase}_kidney_right.nii.gz"
+    
+    if kl_path.exists() and kr_path.exists():
+        try:
+            kl_img = nib.load(str(kl_path))
+            kr_img = nib.load(str(kr_path))
+            
+            kl_xyz = (np.asanyarray(kl_img.dataobj) > 0.5)
+            kr_xyz = (np.asanyarray(kr_img.dataobj) > 0.5)
+            
+            kl_zyx = xyz2zyx(kl_xyz)
+            kr_zyx = xyz2zyx(kr_xyz)
+            
+            return kl_zyx, kr_zyx, 1.0
+        except Exception:
+            # If loading fails, fall back to segmenting
+            return None
+    return None
+
+
 def kidneys_features(
     vol, vol_sitk,
     dicom_dir: PathLike,
+    case_id: str,
+    phase: str,
     *,
     device: str = "cpu",
     fast: bool = True,
     percentiles: List[float] = DEFAULT_PERCENTILES,
+    resample_factor: float | None = None,
     keep_debug_dir: bool = False,
+    segmentations_root: Path | None = None,
 ) -> Dict[str, object]:
     """
-    Loads DICOM, runs TotalSegmentator kidneys, computes per-kidney stats,
-    and adds right-kidney percentile slice indices for later slice extraction.
+    Loads DICOM, runs TotalSegmentator kidneys (or loads cached segmentations),
+    computes per-kidney stats, and adds right-kidney percentile slice indices
+    for later slice extraction.
     """
+    start_time = time.perf_counter()
     dicom_dir = Path(dicom_dir)
     series_name = dicom_dir.name
 
-    kl_zyx, kr_zyx, debug_dir = segment_kidneys(
-        vol_sitk, device=device, fast=fast, keep_debug_dir=keep_debug_dir
-    )
+    # Try to load cached segmentations first
+    kl_zyx = None
+    kr_zyx = None
+    resample_factor_used = 1.0
+    
+    if segmentations_root is not None:
+        cached_segs = load_cached_segmentations(
+            Path(segmentations_root), case_id, phase
+        )
+        if cached_segs is not None:
+            kl_zyx, kr_zyx, resample_factor_used = cached_segs
+    
+    # If not cached, segment
+    if kl_zyx is None or kr_zyx is None:
+        kl_zyx, kr_zyx, resample_factor_used, debug_dir = segment_kidneys(
+            vol_sitk,
+            case_id=case_id,
+            phase=phase,
+            device=device,
+            fast=fast,
+            resample_factor=resample_factor,
+            keep_debug_dir=keep_debug_dir,
+            segmentations_root=segmentations_root,
+        )
 
-    left = _compute_mask_stats(vol.hu_zyx, kl_zyx, vol.spacing_xyz)
-    right = _compute_mask_stats(vol.hu_zyx, kr_zyx, vol.spacing_xyz)
+    left = mask_stats(vol.hu_zyx, kl_zyx, vol.spacing_xyz)
+    right = mask_stats(vol.hu_zyx, kr_zyx, vol.spacing_xyz)
 
     right_pct = percentile_slices(right["z_min"], right["z_max"], percentiles)
 
+    elapsed = time.perf_counter() - start_time
+    
     row: Dict[str, object] = {
         "series_name": series_name,
         "dicom_dir": str(dicom_dir),
         "series_uid": vol.series_uid,
         "right_kidney_percentile_slices": right_pct,
+        "processing_time_seconds": round(elapsed, 3),
+        "resample_factor": resample_factor_used,
     }
     row.update(_prefix(left, "kidney_left_"))
     row.update(_prefix(right, "kidney_right_"))

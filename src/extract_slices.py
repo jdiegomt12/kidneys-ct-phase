@@ -51,6 +51,8 @@ def extract_slices(
     dicom_dir: PathLike,
     *,
     central_slices: List[int],
+    case_id: str,
+    phase: str,
     out_root: PathLike,
     level: float = LEVEL,
     width: float = WIDTH,
@@ -59,19 +61,18 @@ def extract_slices(
 ) -> Path:
     """
     Saves:
-      <out_root>/<series_name>/<series_name>_input_tensor.npy   shape=(15,H,W)
+      <out_root>/<case_id>/<case_id>_<phase>.npy   shape=(15,H,W)
     Optionally saves individual slice npys inside same folder.
     """
     dicom_dir = Path(dicom_dir)
     out_root = Path(out_root)
-    series_name = dicom_dir.name
 
     z_max = vol.hu_zyx.shape[0] - 1
 
     idxs = slice_indices(central_slices, z_max=z_max, neighbor_radius=neighbor_radius)
 
-    series_out = out_root / series_name
-    series_out.mkdir(parents=True, exist_ok=True)
+    case_out = out_root / case_id
+    case_out.mkdir(parents=True, exist_ok=True)
 
     channels: List[np.ndarray] = []
     for z in idxs:
@@ -80,9 +81,10 @@ def extract_slices(
         channels.append(img)
 
         if save_individual_slices:
-            np.save(series_out / f"slice_{z:03d}.npy", img)
+            np.save(case_out / f"slice_{z:03d}.npy", img)
 
     tensor = np.stack(channels, axis=0).astype(np.float32)
-    tensor_path = series_out / f"{series_name}_input_tensor.npy"
+    tensor_name = f"{case_id}_{phase}.npy"
+    tensor_path = case_out / tensor_name
     np.save(tensor_path, tensor)
     return tensor_path

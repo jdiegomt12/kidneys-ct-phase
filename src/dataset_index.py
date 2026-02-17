@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
+import os
 import pandas as pd
 import SimpleITK as sitk
 
@@ -91,47 +92,55 @@ def phases(path: Path) -> Tuple[Optional[str], int]:
     return best_phase, best_score
 
 
-def series_candidates(
-    search_root: Path,
-    *,
-    skip_dirs: Tuple[str, ...] = ("segmenteringer",), # I assume that I won't always have the data already processed and segmented
-) -> List[SeriesCandidate]:
-    """
-    Recursively find folders that contain DICOM series and return candidates.
-    We do not assume .dcm extensions.
-    """
-    candidates: List[SeriesCandidate] = []
-    skip_lower = {x.lower() for x in skip_dirs}
-
-    prev_warning = sitk.ProcessObject.GetGlobalWarningDisplay()
-    sitk.ProcessObject.SetGlobalWarningDisplay(False)
+def is_dicom(filepath: str) -> bool:
+    """Check if a file is a DICOM by reading its header."""
     try:
-        for d in search_root.rglob("*"):
-            if not d.is_dir():
-                continue
-            if d.name.startswith("."):
-                continue
-            if d.name.lower() in skip_lower:
-                continue
+        with open(filepath, 'rb') as f:
+            f.seek(128)
+            return f.read(4) == b"DICM"
+    except Exception:
+        return False
 
-            # quick reject
-            if not contains_dicom(d):
-                continue
 
-            # for each series in that folder
-            phase, base_score = phases(d)
-            for suid, n_files in series_folder(d):
-                candidates.append(
-                    SeriesCandidate(
-                        dicom_dir=d,
-                        series_uid=suid,
-                        n_files=n_files,
-                        score=base_score + min(n_files // 50, 5),
-                        matched_phase=phase,
-                    )
+def series_candidates(search_root: Path) -> List[SeriesCandidate]:
+    candidates = []
+    
+    sitk.ProcessObject.SetGlobalWarningDisplay(False)
+
+    for root, dirs, files in os.walk(search_root):
+        if not files:
+            continue
+        
+        # Only check the first file in the folder
+        first_file = os.path.join(root, files[0])
+        if not is_dicom(first_file):
+            continue
+
+        # If DICOMs are found, list all series in this folder
+        d = Path(root)
+        series_ids = sitk.ImageSeriesReader.GetGDCMSeriesIDs(str(d))
+        
+        if not series_ids:
+            continue
+
+        phase, base_score = phases(d)
+        for suid in series_ids:
+            dicom_files = sitk.ImageSeriesReader.GetGDCMSeriesFileNames(str(d), suid)
+            n_files = len(dicom_files)
+            
+            candidates.append(
+                SeriesCandidate(
+                    dicom_dir=d,
+                    series_uid=suid,
+                    n_files=n_files,
+                    score=base_score + min(n_files // 50, 5),
+                    matched_phase=phase,
                 )
-    finally:
-        sitk.ProcessObject.SetGlobalWarningDisplay(prev_warning)
+            )
+        
+        # If we found DICOMs here, don't search in subfolders
+        dirs[:] = [] 
+
     return candidates
 
 
