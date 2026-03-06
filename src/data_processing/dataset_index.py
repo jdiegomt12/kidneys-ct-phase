@@ -658,6 +658,30 @@ def build_index(
     n_failed = len(df_failed)
     print(f"Done: {n_success} successful, {n_failed} failed")
 
+    # Reorder by case_id and phase priority (venous=0, arterial=1, late=2)
+    df = _reorder_phases(df)
+    df.to_csv(out_index_csv, index=False)  # Save reordered index
+    
+    return df
+
+
+def _reorder_phases(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Reorder dataset so VENOUS is always processed first per case,
+    then ARTERIAL, then LATE to enable metadata alignment.
+    Case IDs are sorted numerically (1, 2, ..., 100) not lexicographically.
+    """
+    if df.empty:
+        return df
+    
+    phase_priority = {"venous": 0, "arterial": 1, "late": 2}
+    
+    # Sort by case_id (numeric), then by phase priority
+    df["_phase_priority"] = df["phase"].map(phase_priority).fillna(999)
+    df["_case_id_numeric"] = pd.to_numeric(df["case_id"], errors="coerce")
+    df = df.sort_values(["_case_id_numeric", "_phase_priority"]).reset_index(drop=True)
+    df = df.drop(columns=["_phase_priority", "_case_id_numeric"])
+    
     return df
 
 

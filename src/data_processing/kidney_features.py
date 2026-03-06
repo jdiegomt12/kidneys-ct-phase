@@ -5,11 +5,11 @@ from typing import Dict, List, Tuple, Union
 import time
 
 import numpy as np
+import SimpleITK as sitk
 
-from segment_kidneys import segment_kidneys
+from segment_kidneys import segment_kidneys, compute_metadata_aligned_z_indices
 
 PathLike = Union[str, Path]
-
 
 DEFAULT_PERCENTILES = [0.15, 0.30, 0.50, 0.70, 0.85] # Moein et al. 2026
 
@@ -147,20 +147,32 @@ def kidneys_features(
     resample_factor: float | None = None,
     keep_debug_dir: bool = False,
     segmentations_root: Path | None = None,
+    spacing_dict: dict | None = None,   # Only metadata: {phase: spacing_xyz}
+    origin_dict: dict | None = None,    # Only metadata: {phase: origin_xyz}
+    kr_venous_cached: np.ndarray | None = None,  # Cached venous kidney_right from previous phase
 ) -> Dict[str, object]:
     """
-    Loads DICOM, runs TotalSegmentator kidneys (or loads cached segmentations),
-    computes per-kidney stats, and adds right-kidney percentile slice indices
-    for later slice extraction.
+    Extract kidney features and compute percentile slices.
+    
+    For VENOUS phase: segments kidney_right with TotalSegmentator, caches result.
+    For ARTERIAL/LATE phases: uses cached venous segmentation + metadata alignment.
+    
+    Args:
+        spacing_dict: Optional dict of spacing for ALL phases (metadata only)
+        origin_dict: Optional dict of origin coordinates for ALL phases (metadata only)
     """
+    global _VENOUS_SEGMENTATION_CACHE
+    
     start_time = time.perf_counter()
     dicom_dir = Path(dicom_dir)
     series_name = dicom_dir.name
 
-    # Try to load cached segmentations first
+    # Try to load cached segmentations from disk first
     kl_zyx = None
     kr_zyx = None
+    kr_venous_zyx = None
     resample_factor_used = 1.0
+    debug_dir = None
     
     if segmentations_root is not None:
         cached_segs = load_cached_segmentations(
@@ -169,23 +181,80 @@ def kidneys_features(
         if cached_segs is not None:
             kl_zyx, kr_zyx, resample_factor_used = cached_segs
     
-    # If not cached, segment
+    # If not found in disk cache, compute segmentation
     if kl_zyx is None or kr_zyx is None:
-        kl_zyx, kr_zyx, resample_factor_used, debug_dir = segment_kidneys(
-            vol_sitk,
-            case_id=case_id,
-            phase=phase,
-            device=device,
-            fast=fast,
-            resample_factor=resample_factor,
-            keep_debug_dir=keep_debug_dir,
-            segmentations_root=segmentations_root,
-        )
+        if phase == "venous":
+            # VENOUS: always segment with TotalSegmentator
+            kl_zyx, kr_zyx, resample_factor_used, debug_dir = segment_kidneys(
+                vol_sitk,
+                case_id=case_id,
+                phase="venous",
+                device=device,
+                fast=fast,
+                resample_factor=resample_factor,
+                keep_debug_dir=keep_debug_dir,
+                segmentations_root=segmentations_root,
+            )
+            # kr_zyx will be returned in the row dict for use by next phases
+            
+        elif phase in ("arterial", "late"):
+            # ARTERIAL/LATE: use metadata alignment with cached venous
+            
+            # Check if venous is cached (passed as parameter)
+            if kr_venous_cached is not None:
+                kr_venous_zyx = kr_venous_cached
+                print(f"[META] Using cached venous kidney_right for case {case_id}", flush=True)
+            else:
+                # Venous not cached - error (shouldn't happen if phases ordered correctly)
+                raise ValueError(
+                    f"Cannot align phase {phase}: venous segmentation not cached. "
+                    f"Ensure venous phase is processed before arterial/late."
+                )
+            
+            # Project venous segmentation to current phase
+            if spacing_dict is None or origin_dict is None:
+                raise ValueError(f"Cannot align to {phase}: need spacing_dict and origin_dict")
+            
+            from segment_kidneys import project_mask_to_phase
+            
+            vol_array = sitk.GetArrayFromImage(vol_sitk)
+            kr_zyx = project_mask_to_phase(
+                kr_venous_zyx,
+                source_spacing=spacing_dict["venous"],
+                source_origin=origin_dict["venous"],
+                target_spacing=spacing_dict[phase],
+                target_origin=origin_dict[phase],
+                target_vol_shape=vol_array.shape,
+            )
+            kl_zyx = np.zeros_like(kr_zyx)
+        else:
+            raise ValueError(f"Unknown phase: {phase}")
 
+    # Compute statistics
     left = mask_stats(vol.hu_zyx, kl_zyx, vol.spacing_xyz)
     right = mask_stats(vol.hu_zyx, kr_zyx, vol.spacing_xyz)
 
-    right_pct = percentile_slices(right["z_min"], right["z_max"], percentiles)
+    # Percentile slices: use converted indices for non-venous phases if metadata alignment active
+    right_pct = None
+    if phase in ("arterial", "late") and spacing_dict is not None and kr_venous_zyx is not None:
+        try:
+            converted_indices = compute_metadata_aligned_z_indices(
+                kr_venous_zyx,
+                spacing_dict,
+                origin_dict,
+            )
+            if phase in converted_indices:
+                z_min_converted, z_max_converted, z_center_converted = converted_indices[phase]
+                right_pct = percentile_slices(z_min_converted, z_max_converted, percentiles)
+                print(f"  [INDICES] Using converted z-indices for {phase}: [{z_min_converted}, {z_max_converted}]", flush=True)
+        except (KeyError, ValueError, IndexError, TypeError) as e:
+            print(f"  [INDICES WARNING] Fallback to mask-based ({type(e).__name__})", flush=True)
+    
+    # Default: use mask-based indices
+    if right_pct is None:
+        right_pct = percentile_slices(right["z_min"], right["z_max"], percentiles)
+        phase="venous",
+        device=device,
 
     elapsed = time.perf_counter() - start_time
     
@@ -202,4 +271,5 @@ def kidneys_features(
     if keep_debug_dir:
         row["debug_dir"] = str(debug_dir) if debug_dir else ""
 
-    return row
+    return row, kr_zyx
+

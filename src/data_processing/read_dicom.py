@@ -77,3 +77,59 @@ def load_dicom(
         return vol, img
     return vol
 
+
+def load_metadata(
+    folder: PathLike,
+    series_uid: Optional[str] = None,
+) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
+    """
+    Load only DICOM metadata (spacing, origin) WITHOUT loading pixel data.
+    
+    Returns:
+        (spacing_xyz, origin_xyz) tuples
+    """
+    folder = Path(folder)
+    series_ids = list_dicom(folder)
+
+    if series_uid is None:
+        if len(series_ids) != 1:
+            raise ValueError(
+                f"Multiple DICOM series found in {folder}. "
+                f"Please specify 'series_uid'. Found: {len(series_ids)}"
+            )
+        series_uid = series_ids[0]
+    else:
+        if series_uid not in series_ids:
+            raise ValueError(f"Requested series_uid not found. Requested={series_uid}")
+
+    # Use ImageFileReader on a single DICOM file to read only headers
+    reader = sitk.ImageFileReader()
+    file_names = sitk.ImageSeriesReader.GetGDCMSeriesFileNames(str(folder), series_uid)
+    
+    if not file_names:
+        raise ValueError(f"No DICOM files found for series {series_uid}")
+    
+    # Read only the first file's metadata
+    reader.SetFileName(file_names[0])
+    reader.ReadImageInformation()
+    
+    spacing_xyz = reader.GetMetaData("0028|0030")  # Pixel Spacing
+    origin_xyz = reader.GetOrigin()
+    
+    # Parse spacing from DICOM tag (format: "x\\y")
+    spacing_parts = spacing_xyz.split("\\")
+    if len(spacing_parts) == 2:
+        sx, sy = float(spacing_parts[0]), float(spacing_parts[1])
+    else:
+        sx = sy = 1.0
+    
+    # Get slice thickness from metadata
+    try:
+        sz = float(reader.GetMetaData("0018|0088"))  # Slice Thickness
+    except:
+        sz = 1.0
+    
+    spacing_xyz = (sx, sy, sz)
+    
+    return spacing_xyz, origin_xyz
+
