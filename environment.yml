@@ -1,0 +1,64 @@
+# Conda Environment for Kidney CT Phase Segmentation Pipeline
+# 
+# This environment file ensures reproducible results by specifying exact package versions
+# and their build hashes. Generated on 2026-02-16 from Python 3.10.19
+#
+# USAGE:
+#   conda env create -f environment.yml      # Creates a new "kidney" environment
+#   conda env update -f environment.yml      # Updates existing "kidney" environment
+#
+# Key Dependencies:
+#   - SimpleITK 2.5.3: Medical image processing and DICOM loading
+#   - nibabel 5.3.2: NIfTI file I/O  
+#   - numpy 2.2.6: Numerical computing
+#   - pandas 2.3.3: Data manipulation and CSV handling
+#   - matplotlib 3.10.8: Visualization
+#   - scipy 1.15.2: Scientific computing
+#   - TotalSegmentator 2.12.0: Kidney segmentation (via pip)
+#   - pydicom 3.0.1: DICOM file reading (via pip)
+
+name: kidney
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  # Core scientific computing
+  - numpy=2.2.6=py310h4987827_0
+  - scipy=1.15.2=py310h15c175c_0
+  - pandas=2.3.3=py310hed136d8_2
+  
+  # Medical imaging
+  - simpleitk=2.5.3=py310hccb65eb_0
+  - nibabel=5.3.2=pyha770c72_1
+  
+  # Visualization
+  - matplotlib=3.10.8=py310haa95532_0
+  - matplotlib-base=3.10.8=py310h0bdd906_0
+  - pillow=12.1.0=py310h712baa7_0
+  
+  # Base libraries
+  - python=3.10.19=h981015d_0
+  - pip=26.0
+  - setuptools=80.10.1=py310haa95532_0
+  - wheel=0.46.3=py310haa95532_0
+  
+  # System libraries and utilities
+  - tk=8.6.15=hf199647_0
+  - sqlite=3.51.1=hda9a48d_0
+  - openssl=3.6.1=hf411b9b_1
+  - libzlib=1.3.1=h02ab6af_0
+  - tzdata=2025c=he532380_0
+  - tqdm=4.67.3=pyha7b4d00_0
+  - pyyaml=6.0.3
+  - requests=2.32.5
+  
+  # pip-installable packages
+  - pip:
+    # Medical visualization (runs TotalSegmentator CLI externally)
+    - totalsegmentator==2.12.0
+    
+    # DICOM support
+    - pydicom==3.0.1
+    - python-gdcm==3.2.2
+
+prefix: C:\Users\juand\miniconda3\envs\kidney

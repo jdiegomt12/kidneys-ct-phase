@@ -28,7 +28,23 @@ If contrast timing can be estimated reliably from scans that are already being a
 
 ## Setup Instructions
 
-### Using Python virtual environment
+### Option 1: Using Conda (Recommended for Full Reproducibility)
+
+For exact reproducibility with all binary dependencies and build hashes:
+
+```bash
+conda env create -f environment.yml
+conda activate kidney
+```
+
+To update an existing environment:
+```bash
+conda env update -f environment.yml --prune
+```
+
+### Option 2: Using pip (More Portable)
+
+For a lighter setup with flexible version ranges:
 
 1. Create a virtual environment:
    ```bash
@@ -49,3 +65,20 @@ If contrast timing can be estimated reliably from scans that are already being a
    ```bash
    pip install -r requirements.txt
    ```
+
+### Dependencies Summary
+
+**Core Libraries:**
+- `numpy`, `scipy`, `pandas`: Numerical and data processing
+- `SimpleITK`: DICOM loading and medical image processing  
+- `nibabel`: NIfTI file I/O
+- `matplotlib`, `PIL`: Visualization
+
+**Segmentation:**
+- `totalsegmentator`: Kidney segmentation (runs CLI externally)
+
+**DICOM I/O:**
+- `pydicom`, `python-gdcm`: DICOM reader support
+
+**Utilities:**
+- `tqdm`, `pyyaml`, `requests`: Utilities and network
