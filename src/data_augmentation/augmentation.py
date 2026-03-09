@@ -3,28 +3,90 @@ import numpy as np
 from typing import Dict, Tuple, Optional
 from pathlib import Path
 import json
+from itertools import combinations
 from scipy.ndimage import map_coordinates, gaussian_filter
 
 
 def get_augmentation_pipeline():
-    """Pipeline de augmentación para múltiples fases simultáneamente"""
+    """
+    Pipeline de augmentación espacial para múltiples fases simultáneamente.
+    
+    Regla de muestreo:
+    - 50% de probabilidad de aplicar 1 transformación espacial
+    - 50% de probabilidad de aplicar 2 transformaciones espaciales
+    
+    Las combinaciones se eligen equiprobablemente dentro de cada tamaño.
+    """
+    spatial_ops = [
+        A.Rotate(limit=5, p=1.0),
+        A.ShiftScaleRotate(
+            shift_limit=0.03,
+            scale_limit=0.05,
+            rotate_limit=0,
+            p=1.0,
+        ),
+    ]
+
+    n_transforms = int(np.random.choice([1, 2], p=[0.5, 0.5]))
+    chosen_idx = np.random.choice(len(spatial_ops), size=n_transforms, replace=False)
+    chosen_ops = [spatial_ops[i] for i in chosen_idx]
+
     return A.Compose(
-        [
-            A.HorizontalFlip(p=0.5),
-            A.Rotate(limit=10, p=0.5),
-            A.ShiftScaleRotate(
-                shift_limit=0.05,
-                scale_limit=0.1,
-                rotate_limit=0,
-                p=0.5,
-            ),
-            A.GaussNoise(var_limit=(0.0005, 0.002), p=0.3),
-        ],
+        chosen_ops,
         additional_targets={
             'image1': 'image',  # phase 2 (venous)
             'image2': 'image',  # phase 3 (late)
         }
     )
+
+
+def get_intensity_augmentation_pipeline():
+    """
+    Pipeline de augmentación basado en intensidades para CT médico.
+    
+    IMPORTANTE: Los tensores están normalizados a [0, 1] (ver extract_slices.prepro).
+    Las transformaciones son sutiles para preservar información diagnóstica.
+    
+    Regla de muestreo:
+    - 1/3 de probabilidad de aplicar 1 transformación de intensidad
+    - 1/3 de probabilidad de aplicar 2 transformaciones de intensidad
+    - 1/3 de probabilidad de aplicar 3 transformaciones de intensidad
+    
+    Las combinaciones se eligen equiprobablemente dentro de cada tamaño.
+    
+    Simulaciones:
+    1. Motion Blur MUY sutil: Simula artefacto leve de movimiento
+    2. Filtros de Reconstrucción sutiles: Blur/Sharpen para simular máquinas diferentes
+    3. Gamma: Variación sutil de contraste (0.8-1.2)
+    """
+    intensity_ops = [
+        A.MotionBlur(blur_limit=3, p=1.0),
+        A.OneOf([
+            A.Blur(blur_limit=3, p=1.0),
+            A.MedianBlur(blur_limit=3, p=1.0),
+            A.Sharpen(alpha=(0.05, 0.15), p=1.0),
+        ], p=1.0),
+        A.RandomGamma(gamma_limit=(60, 140), p=1.0),
+    ]
+
+    n_transforms = int(np.random.choice([1, 2, 3], p=[1/3, 1/3, 1/3]))
+
+    if n_transforms == 3:
+        chosen_ops = intensity_ops
+    else:
+        possible_combinations = list(combinations(range(len(intensity_ops)), n_transforms))
+        combo_idx = int(np.random.randint(0, len(possible_combinations)))
+        chosen_idx = possible_combinations[combo_idx]
+        chosen_ops = [intensity_ops[i] for i in chosen_idx]
+
+    return A.Compose(
+        chosen_ops,
+        additional_targets={
+            'image1': 'image',  # phase 2 (venous)
+            'image2': 'image',  # phase 3 (late)
+        }
+    )
+
 
 
 def augment_tensor(tensor: np.ndarray, transform):
