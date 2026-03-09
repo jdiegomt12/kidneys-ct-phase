@@ -123,3 +123,4 @@ wandb/
 *.raw
 *.npy
 *.npz
+*.png
