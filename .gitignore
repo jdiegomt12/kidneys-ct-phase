@@ -112,3 +112,14 @@ mlruns/
 # Experiment tracking
 wandb/
 .neptune/
+
+
+# Medical Imaging formats
+*.nii
+*.nii.gz
+*.dcm
+*.dicom
+*.mhd
+*.raw
+*.npy
+*.npz
